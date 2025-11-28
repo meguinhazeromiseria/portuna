@@ -1,0 +1,48 @@
+# ===== scraper-caixa.yml =====
+name: Caixa
+
+on:
+  schedule:
+    - cron: '0 3 10 * *'  # Dia 10 de cada mês às 3h UTC
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150  # 2h30min (script tem timeout interno de 2h)
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Cache Playwright
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+      
+      - name: Instalar deps
+        run: |
+          pip install playwright requests beautifulsoup4
+          playwright install chromium --with-deps
+      
+      - name: Rodar scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cd scrapers
+          python caixa_scraper.py --full-update
+      
+      - name: Upload logs em caso de erro
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: caixa-error-logs-${{ github.run_number }}
+          path: scrapers/caixa_data/*.json
+          retention-days: 7

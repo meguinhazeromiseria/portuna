@@ -1,0 +1,177 @@
+AC
+24 - Rio Branco
+22 - Porto Acre
+7 - Cruzeiro do Sul
+#################################################
+AL
+118 - Maceió
+39 - Arapiraca
+168 - Rio Largo
+153 - Penedo
+#################################################
+AM
+260 - Manaus
+273 - Itacoatiara
+291 - Tefé
+#################################################
+AP
+326 - Macapá
+323 - Laranjal do Jari
+#################################################
+BA
+1017 - Salvador
+604 - Feira de Santana
+1146 - Vitória da Conquista
+815 - Lauro de Freitas
+494 - Camaçari
+683 - Ilhéus
+707 - Jequié
+937 - Paulo Afonso
+784 - Juazeiro
+#################################################
+CE
+1377 - Fortaleza
+1314 - Caucaia
+1186 - Aquiraz
+1482 - Juazeiro do Norte
+#################################################
+DF
+1809 - Brasília
+1835 - Taguatinga
+1820 - Ceilândia
+1822 - Gama
+1831 - Samambaia
+#################################################
+ES
+2089 - Vitória
+2085 - Vila Velha
+2069 - Serra
+1919 - Guarapari
+1965 - Linhares
+#################################################
+GO
+2216 - Goiania
+2110 - Aparecida de Goiania
+2106 - Anápolis
+2148 - Caldas Novas
+2340 - Rio Verde
+2378 - Senador Canedo
+2392 - Trindade
+#################################################
+MA
+2632 - São Luís
+2519 - Imperatriz
+2412 - Açailândia
+#################################################
+MG
+2803 - Belo Horizonte
+3031 - Contagem
+4105 - Uberlândia
+3367 - Juiz de Fora
+2811 - Betim
+3099 - Divinópolis
+4043 - Sete Lagoas
+#################################################
+MS
+4198 - Campo Grande
+4220 - Dourados
+4320 - Três Lagoas
+#################################################
+MT
+4405 - Cuiabá
+4570 - Várzea Grande
+4521 - Rondonópolis
+4552 - Sinop
+4554 - Sorriso
+4448 - Lucas do Rio Verde
+#################################################
+PA
+4625 - Belém
+4599 - Ananindeua
+4738 - Marabá
+4791 - Parauapebas
+#################################################
+PB
+5041 - João Pessoa
+4975 - Campina Grande
+4960 - Cabedelo
+5096 - Patos
+#################################################
+PE
+5500 - Recife
+5396 - Jaboatão dos Guararapes
+5456 - Olinda
+5310 - Caruaru
+5483 - Petrolina
+#################################################
+PI
+5847 - Teresina
+5774 - Parnaíba
+5784 - Picos
+#################################################
+PR
+6143 - Curitiba
+6400 - Londrina
+6440 - Maringá
+6220 - Foz do Iguaçu
+6068 - Cascavel
+#################################################
+RJ
+7186 - Rio de Janeiro
+7132 - Niterói
+7055 - Duque de Caxias
+7137 - Nova Iguaçu
+6987 - Angra dos Reis
+7016 - Cabo Frio
+7024 - Campos dos Goytacazes
+#################################################
+RN
+7367 - Natal
+7366 - Mossoró
+7377 - Parnamirim
+#################################################
+RO
+7512 - Porto Velho
+7495 - Ji-Paraná
+#################################################
+RR
+7538 - Boa Vista
+#################################################
+RS
+8160 - Porto Alegre
+7730 - Caxias do Sul
+8131 - Pelotas
+7697 - Canoas
+7914 - Gravataí
+8084 - Novo Hamburgo
+7694 - Canela
+#################################################
+SC
+8621 - Florianópolis
+8545 - Blumenau
+8690 - Joinville
+8678 - Itapema
+#################################################
+SE
+8944 - Aracaju
+8995 - Nossa Senhora do Socorro
+#################################################
+SP
+9859 - São Paulo
+9827 - Santos
+9717 - Praia Grande
+9869 - São Vicente
+9205 - Campinas
+9851 - São José dos Campos
+9919 - Taubaté
+9451 - Jacareí
+9750 - Ribeirão Preto
+9327 - Franca
+9887 - Sorocaba
+9479 - Jundiaí
+9444 - Itu
+#################################################
+TO
+10095 - Palmas
+9999 - Araguaína
+10058 - Gurupi

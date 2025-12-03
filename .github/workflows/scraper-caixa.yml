@@ -1,0 +1,100 @@
+# ===== scraper-caixa.yml =====
+# CAIXA ECONÔMICA FEDERAL - Todas as cidades
+# Execução: 6:25 UTC (03:25 BRT - Horário de Brasília)
+# Timeout: 150min (2h30min, script tem timeout interno de 2h)
+
+name: Caixa - Full Update
+
+on:
+  schedule:
+    - cron: '25 6 * * *'  # TODO DIA às 6:25 UTC = 03:25 BRT
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150  # 2h30min
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Cache Playwright
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+      
+      - name: Install Dependencies
+        run: |
+          pip install playwright requests beautifulsoup4
+          playwright install chromium --with-deps
+      
+      - name: Run Caixa Scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          cd scrapers
+          
+          echo "======================================"
+          echo "🏠 CAIXA ECONÔMICA FEDERAL"
+          echo "======================================"
+          echo "📅 Início: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "🇧🇷 Horário Brasília: $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M:%S BRT')"
+          echo "📦 Processando todas as cidades"
+          echo "⏱️  Timeout: 2h30min"
+          echo "======================================"
+          echo ""
+          
+          START=$(date +%s)
+          
+          python caixa_scraper.py --full-update
+          
+          EXIT_CODE=$?
+          END=$(date +%s)
+          DURATION=$(( (END - START) / 60 ))
+          
+          echo ""
+          echo "======================================"
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ CAIXA CONCLUÍDO em ${DURATION} minutos"
+          else
+            echo "❌ CAIXA FALHOU (código $EXIT_CODE) após ${DURATION} minutos"
+          fi
+          echo "🕐 Término UTC: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "🇧🇷 Término BRT: $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M:%S BRT')"
+          echo "======================================"
+          
+          exit $EXIT_CODE
+      
+      - name: Upload Artifacts on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: caixa-error-logs-${{ github.run_number }}
+          path: scrapers/caixa_data/*.json
+          retention-days: 7
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 🏠 Caixa - Full Update" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Horário UTC:** $(date -u '+%Y-%m-%d %H:%M')" >> $GITHUB_STEP_SUMMARY
+          echo "**Horário BRT:** $(TZ='America/Sao_Paulo' date '+%Y-%m-%d %H:%M')" >> $GITHUB_STEP_SUMMARY
+          echo "**Cidades:** Todas" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Scraping concluído com sucesso!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Falhou — veja os logs para detalhes." >> $GITHUB_STEP_SUMMARY
+          fi

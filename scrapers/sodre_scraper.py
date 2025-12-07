@@ -5,6 +5,7 @@ SODRÉ SANTORO SCRAPER - GitHub Actions Ready
 Timeout: 2h58min (10680 segundos)
 Delays: 20-40s entre categorias, 1.5-3s entre páginas
 Checkpoint automático a cada 1000 itens
+✅ FILTRO: Apenas lotes ATIVOS (lot_status_id: 1, 2, 3)
 """
 
 import json
@@ -40,6 +41,14 @@ INDICES = {
     "sucatas": ["sucatas"],
     "judiciais": ["judiciais"],
 }
+
+# ✅ STATUS DOS LOTES (baseado no site)
+# 1 = Aberto para lances
+# 2 = Em andamento
+# 3 = Aguardando início
+# 4 = Encerrado ❌
+# 5 = Cancelado ❌
+ACTIVE_STATUS = [1, 2, 3]  # Apenas lotes ativos
 
 # Configurações
 MAX_EXECUTION_TIME = 10680  # 2h58min
@@ -139,10 +148,24 @@ class SodreScraper:
             return {}
     
     def fetch_page(self, indices: List[str], from_offset: int, page_size: int = 100) -> Tuple[Optional[dict], Optional[str]]:
-        """Busca página com retry automático"""
+        """Busca página com retry automático + FILTRO DE LOTES ATIVOS"""
         payload = {
             "indices": indices,
-            "query": {"bool": {"must": [], "filter": [], "should": [], "must_not": []}},
+            "query": {
+                "bool": {
+                    "must": [],
+                    "filter": [
+                        # ✅ FILTRO CRÍTICO: Apenas lotes ativos (status 1, 2, 3)
+                        {
+                            "terms": {
+                                "lot_status_id": ACTIVE_STATUS
+                            }
+                        }
+                    ],
+                    "should": [],
+                    "must_not": []
+                }
+            },
             "from": from_offset,
             "size": page_size,
             "sort": [
@@ -235,6 +258,7 @@ class SodreScraper:
                     print(f"   Categoria: {category_name}")
                     print(f"   Título: {normalized['title']}")
                     print(f"   Valor: {normalized.get('value_text', 'N/A')}")
+                    print(f"   Status: {lots[0].get('lot_status', 'N/A')} (ID: {lots[0].get('lot_status_id')})")
                     print(f"   ID: {normalized['external_id']}")
                     print(f"   Link: {normalized['link']}\n")
                     primeiro_lote_global['mostrado'] = True
@@ -264,6 +288,12 @@ class SodreScraper:
         # ✅ PROTEÇÃO: Ignora lotes None ou inválidos
         if lot is None or not isinstance(lot, dict):
             print(f"⚠️ Lote inválido ignorado: {type(lot)}")
+            return None
+        
+        # ✅ VALIDAÇÃO EXTRA: Verifica se o lote está ativo
+        lot_status_id = lot.get("lot_status_id")
+        if lot_status_id not in ACTIVE_STATUS:
+            print(f"⚠️ Lote encerrado ignorado: status_id={lot_status_id}")
             return None
         
         auction_id = lot.get("auction_id")
@@ -473,6 +503,7 @@ class SodreScraper:
         print("="*80)
         print(f"⏰ Início: {datetime.now().strftime('%H:%M:%S')}")
         print(f"⏱️ Timeout: 2h58min")
+        print(f"✅ Filtro: Apenas lotes ATIVOS (status 1, 2, 3)")
         print(f"⏳ Delay entre categorias: {CATEGORY_DELAY_MIN}-{CATEGORY_DELAY_MAX}s\n")
         
         # Captura cookies uma vez
@@ -517,7 +548,7 @@ class SodreScraper:
         unique = {item["external_id"]: item for item in all_lots}
         all_lots = list(unique.values())
         
-        print(f"\n✅ Total único: {len(all_lots)} lotes")
+        print(f"\n✅ Total único: {len(all_lots)} lotes ATIVOS")
         
         return all_lots
 
@@ -597,7 +628,7 @@ def main():
             print(f"\n{'='*80}")
             print("📈 ESTATÍSTICAS")
             print(f"{'='*80}")
-            print(f"Total: {len(items)} lotes")
+            print(f"Total: {len(items)} lotes ATIVOS")
             
             # Por categoria
             cats = {}

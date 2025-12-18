@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SUPABASE CLIENT - NORMALIZAÇÃO ROBUSTA
-Suporta: Bradesco, Caixa, Sodré
+SUPABASE CLIENT v3.0 - Bradesco, Caixa, Sodré
+Performance máxima com RPC nativo
 """
 
 import os
 import re
+import time
 import requests
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 
 class SupabaseClient:
@@ -24,101 +27,166 @@ class SupabaseClient:
             'apikey': self.key,
             'Authorization': f'Bearer {self.key}',
             'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
+            'Prefer': 'return=minimal'
         }
+        
+        self.session = self._create_session()
+        self._rpc_available = None
+        self._check_rpc_availability()
     
-    def insert_raw(self, source: str, data: Any) -> bool:
-        """Insere dados RAW (backup completo)"""
-        url = f"{self.url}/rest/v1/raw_auctions"
-        payload = {'source': source, 'data': data}
+    def _create_session(self) -> requests.Session:
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["POST", "GET", "PATCH"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
+    
+    def _check_rpc_availability(self) -> bool:
+        if self._rpc_available is not None:
+            return self._rpc_available
         
         try:
-            r = requests.post(url, headers=self.headers, json=payload, timeout=30)
-            r.raise_for_status()
-            print(f"✅ RAW salvo: {source}")
-            return True
+            url = f"{self.url}/rest/v1/rpc/upsert_auctions_v2"
+            r = self.session.post(url, headers=self.headers, json={'items': []}, timeout=5)
+            self._rpc_available = r.status_code in (200, 201)
+            
+            if self._rpc_available:
+                print("✅ RPC upsert_auctions_v2 disponível")
+            else:
+                print("⚠️ RPC não disponível - execute install.sql")
         except Exception as e:
-            print(f"❌ Erro RAW: {e}")
-            return False
+            print(f"⚠️ Erro ao verificar RPC: {e}")
+            self._rpc_available = False
+        
+        return self._rpc_available
+    
+    def insert_raw(self, source: str, data: Any) -> bool:
+        """Compatibilidade - não faz nada"""
+        return True
+    
+    def upsert_normalized(self, items: List[Dict]) -> Dict[str, int]:
+        if not items:
+            return {'inserted': 0, 'updated': 0, 'errors': 0, 'time_ms': 0}
+        
+        start_time = time.time()
+        
+        if self._rpc_available:
+            stats = self._upsert_via_rpc(items)
+        else:
+            print("⚠️ Execute install.sql para melhor performance!")
+            stats = self._upsert_fallback(items)
+        
+        stats['time_ms'] = int((time.time() - start_time) * 1000)
+        return stats
+    
+    def _upsert_via_rpc(self, items: List[Dict]) -> Dict[str, int]:
+        url = f"{self.url}/rest/v1/rpc/upsert_auctions_v2"
+        stats = {'inserted': 0, 'updated': 0, 'errors': 0}
+        batch_size = 500
+        
+        print(f"📦 Processando {len(items)} itens")
+        
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i+batch_size]
+            
+            try:
+                r = self.session.post(url, headers=self.headers, json={'items': batch}, timeout=120)
+                
+                if r.status_code == 200:
+                    result = r.json()
+                    stats['inserted'] += result.get('inserted', 0)
+                    stats['updated'] += result.get('updated', 0)
+                    stats['errors'] += result.get('errors', 0)
+                    print(f"   ✅ Batch {i//batch_size + 1}: +{result.get('inserted', 0)} novos, ~{result.get('updated', 0)} atualizados")
+                else:
+                    print(f"   ❌ Batch {i//batch_size + 1}: HTTP {r.status_code}")
+                    stats['errors'] += len(batch)
+            except Exception as e:
+                print(f"   ❌ Batch {i//batch_size + 1}: {str(e)[:100]}")
+                stats['errors'] += len(batch)
+        
+        print(f"\n📊 RESULTADO: {stats['inserted']} novos | {stats['updated']} atualizados | {stats['errors']} erros")
+        return stats
+    
+    def _upsert_fallback(self, items: List[Dict]) -> Dict[str, int]:
+        url = f"{self.url}/rest/v1/auctions"
+        headers = self.headers.copy()
+        headers['Prefer'] = 'resolution=merge-duplicates,return=minimal'
+        
+        stats = {'inserted': 0, 'updated': 0, 'errors': 0}
+        
+        for i in range(0, len(items), 200):
+            batch = items[i:i+200]
+            try:
+                r = self.session.post(url, headers=headers, json=batch, timeout=30)
+                if r.status_code in (200, 201):
+                    stats['inserted'] += len(batch)
+                    print(f"   ✅ Batch {i//200 + 1}: {len(batch)} processados")
+                else:
+                    stats['errors'] += len(batch)
+            except Exception as e:
+                print(f"   ❌ Erro: {str(e)[:100]}")
+                stats['errors'] += len(batch)
+        
+        return stats
     
     def insert_normalized(self, items: List[Dict]) -> int:
-        """INSERT com detecção de duplicatas via constraint do banco"""
-        if not items:
-            return 0
-        
-        url = f"{self.url}/rest/v1/auctions"
-        total_inserted = 0
-        total_duplicated = 0
-        
-        # Batch de 500
-        for i in range(0, len(items), 500):
-            batch = items[i:i+500]
-            try:
-                r = requests.post(url, headers=self.headers, json=batch, timeout=60)
-                
-                if r.status_code == 409:
-                    # Duplicatas pela constraint
-                    print(f"   ⚪ Batch {i//500 + 1}: {len(batch)} duplicados")
-                    total_duplicated += len(batch)
-                elif r.status_code in (200, 201):
-                    # Inseridos com sucesso
-                    print(f"   ✅ Batch {i//500 + 1}: {len(batch)} novos")
-                    total_inserted += len(batch)
-                else:
-                    r.raise_for_status()
-                    
-            except Exception as e:
-                if "409" in str(e) or "duplicate key" in str(e).lower():
-                    print(f"   ⚪ Batch {i//500 + 1}: {len(batch)} duplicados")
-                    total_duplicated += len(batch)
-                else:
-                    print(f"   ❌ Erro batch {i//500 + 1}: {e}")
-        
-        print(f"\n📊 Inseridos: {total_inserted} | Duplicados: {total_duplicated}")
-        return total_inserted
+        result = self.upsert_normalized(items)
+        return result['inserted'] + result['updated']
+    
+    def __del__(self):
+        if hasattr(self, 'session'):
+            self.session.close()
 
 
 # ============================================================
-# 🧹 FUNÇÕES DE LIMPEZA E PARSING
+# HELPERS
 # ============================================================
+
+_REGEX_CACHE = {
+    'whitespace': re.compile(r'\s+'),
+    'control_chars': re.compile(r'[\x00-\x1f\x7f-\x9f]'),
+    'state_end': re.compile(r'[-/]\s*([A-Z]{2})\s*$'),
+}
+
+_UFS = {'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
+        'PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'}
+
 
 def clean_text(text: Optional[str], max_len: Optional[int] = None) -> Optional[str]:
-    """Limpa texto: remove espaços extras, quebras, caracteres especiais"""
     if not text:
         return None
-    
-    text = re.sub(r'\s+', ' ', str(text)).strip()
-    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
-    
+    text = _REGEX_CACHE['whitespace'].sub(' ', str(text)).strip()
+    text = _REGEX_CACHE['control_chars'].sub('', text)
     if max_len and len(text) > max_len:
         text = text[:max_len].rsplit(' ', 1)[0] + '...'
-    
     return text if text else None
 
 
 def extract_state(text: Optional[str]) -> Optional[str]:
-    """Extrai UF de texto livre"""
     if not text:
         return None
     
-    # Padrão: "CIDADE - UF" ou "CIDADE/UF"
-    match = re.search(r'[-/]\s*([A-Z]{2})\s*$', text.upper())
+    text_upper = text.upper()
+    match = _REGEX_CACHE['state_end'].search(text_upper)
     if match:
-        return match.group(1)
+        uf = match.group(1)
+        return uf if uf in _UFS else None
     
-    # Lista completa de UFs
-    ufs = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
-           'PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
-    
-    for uf in ufs:
-        if re.search(rf'\b{uf}\b', text.upper()):
-            return uf
+    for word in text_upper.split():
+        if word in _UFS:
+            return word
     
     return None
 
 
 def parse_address(text: Optional[str]) -> Dict[str, Optional[str]]:
-    """Parse inteligente de endereço"""
     result = {'address': None, 'city': None, 'state': None}
     
     if not text:
@@ -126,7 +194,6 @@ def parse_address(text: Optional[str]) -> Dict[str, Optional[str]]:
     
     text = clean_text(text)
     
-    # "RUA X, N - BAIRRO, CIDADE - UF"
     match = re.match(r'(.+?)[-,]\s*([^-,]+)\s*[-,]\s*([A-Z]{2})\s*$', text)
     if match:
         result['address'] = clean_text(match.group(1))
@@ -134,7 +201,6 @@ def parse_address(text: Optional[str]) -> Dict[str, Optional[str]]:
         result['state'] = match.group(3)
         return result
     
-    # "CIDADE - UF"
     match = re.search(r'([^-/]+)\s*[-/]\s*([A-Z]{2})\s*$', text)
     if match:
         result['city'] = clean_text(match.group(1))
@@ -149,73 +215,53 @@ def parse_address(text: Optional[str]) -> Dict[str, Optional[str]]:
 
 
 def parse_value(value: Any) -> Optional[float]:
-    """Converte valor para float"""
     if value is None:
         return None
-    
     if isinstance(value, (int, float)):
         return float(value)
-    
     if isinstance(value, str):
-        # Remove tudo exceto números e vírgula
-        value = re.sub(r'[^\d,]', '', value).replace(',', '.')
+        clean = re.sub(r'[^\d,]', '', value).replace(',', '.')
         try:
-            return float(value) if value else None
+            return float(clean) if clean else None
         except:
             return None
-    
     return None
 
 
 def parse_date(date_str: Optional[str]) -> Optional[str]:
-    """Converte data para ISO (YYYY-MM-DD) com validação"""
     if not date_str:
         return None
     
-    parsed_date = None
-    
-    # ISO 8601 completo (2024-12-31T23:59:59Z)
     match = re.search(r'(\d{4}-\d{2}-\d{2})', date_str)
     if match:
-        parsed_date = match.group(1)
-    
-    # DD/MM/YYYY
-    if not parsed_date:
+        parsed = match.group(1)
+    else:
         match = re.search(r'(\d{2})/(\d{2})/(\d{4})', date_str)
         if match:
             day, month, year = match.groups()
-            parsed_date = f"{year}-{month}-{day}"
-    
-    # Validação: data futura ou até 2 anos atrás
-    if parsed_date:
-        try:
-            date_obj = datetime.strptime(parsed_date, '%Y-%m-%d')
-            hoje = datetime.now()
-            dois_anos_atras = hoje - timedelta(days=730)
-            
-            if date_obj < dois_anos_atras:
-                return None
-            
-            return parsed_date
-        except:
+            parsed = f"{year}-{month}-{day}"
+        else:
             return None
     
-    return None
+    try:
+        date_obj = datetime.strptime(parsed, '%Y-%m-%d')
+        dois_anos_atras = datetime.now() - timedelta(days=730)
+        if date_obj < dois_anos_atras:
+            return None
+        return parsed
+    except:
+        return None
 
 
 def generate_clean_external_id(source: str, raw_id: Any) -> str:
-    """Gera external_id limpo: {source}_{id}"""
     if not raw_id:
-        return f"{source}_unknown_{int(datetime.now().timestamp())}"
-    
-    clean_id = re.sub(r'[^a-zA-Z0-9-]', '_', str(raw_id).lower())
-    clean_id = re.sub(r'_+', '_', clean_id).strip('_')
-    
-    return f"{source}_{clean_id}"
+        return f"{source}_unknown_{int(time.time() * 1000)}"
+    clean = re.sub(r'[^a-zA-Z0-9-]', '_', str(raw_id).lower())
+    clean = re.sub(r'_+', '_', clean).strip('_')
+    return f"{source}_{clean}"
 
 
 def extract_category(text: Optional[str], tipo: Optional[str]) -> Optional[str]:
-    """Extrai categoria específica"""
     if not text:
         return None
     
@@ -233,7 +279,7 @@ def extract_category(text: Optional[str], tipo: Optional[str]) -> Optional[str]:
         return 'Carro'
     if 'moto' in text or 'motocicleta' in text:
         return 'Moto'
-    if 'caminhão' in text or 'caminhao' in text or 'truck' in text:
+    if 'caminhão' in text or 'truck' in text:
         return 'Caminhão'
     if 'van' in text or 'kombi' in text:
         return 'Van'
@@ -245,7 +291,6 @@ def extract_category(text: Optional[str], tipo: Optional[str]) -> Optional[str]:
 
 
 def extract_title_from_description(desc: Optional[str], max_len: int = 100) -> Optional[str]:
-    """Extrai título inteligente da descrição"""
     if not desc:
         return None
     
@@ -262,11 +307,10 @@ def extract_title_from_description(desc: Optional[str], max_len: int = 100) -> O
 
 
 # ============================================================
-# 🎯 NORMALIZADORES POR FONTE
+# NORMALIZERS
 # ============================================================
 
 def normalize_bradesco(data: Dict) -> List[Dict]:
-    """Normaliza Bradesco"""
     results = []
     
     for estado, items in data.items():
@@ -305,7 +349,6 @@ def normalize_bradesco(data: Dict) -> List[Dict]:
 
 
 def normalize_caixa(data: Dict) -> List[Dict]:
-    """Normaliza Caixa"""
     results = []
     
     for estado, items in data.items():
@@ -345,7 +388,6 @@ def normalize_caixa(data: Dict) -> List[Dict]:
 
 
 def normalize_sodre(data: List[Dict]) -> List[Dict]:
-    """Normaliza Sodré - dados já vêm normalizados do scraper"""
     results = []
     
     for item in data:
@@ -355,12 +397,10 @@ def normalize_sodre(data: List[Dict]) -> List[Dict]:
         if not external_id or not link:
             continue
         
-        # Valida estado (2 caracteres)
         state = item.get('state')
         if state and len(state) != 2:
             state = None
         
-        # Converte auction_date se for string ISO
         auction_date = item.get('auction_date')
         if auction_date and isinstance(auction_date, str):
             try:
@@ -370,7 +410,6 @@ def normalize_sodre(data: List[Dict]) -> List[Dict]:
             except:
                 auction_date = None
         
-        # Garante que category seja lowercase se for 'outros'
         category = item.get('category', 'outros')
         if not category or category == 'Outros':
             category = 'outros'
@@ -403,10 +442,6 @@ def normalize_sodre(data: List[Dict]) -> List[Dict]:
     return results
 
 
-# ============================================================
-# 🎯 DISPATCHER
-# ============================================================
-
 NORMALIZERS = {
     'bradesco': normalize_bradesco,
     'caixa': normalize_caixa,
@@ -415,24 +450,18 @@ NORMALIZERS = {
 
 
 def normalize(source: str, data: Any) -> List[Dict]:
-    """Normalização principal - despacha para o normalizer correto"""
     normalizer = NORMALIZERS.get(source.lower())
     if not normalizer:
         raise ValueError(f"Fonte desconhecida: {source}. Suportadas: {', '.join(NORMALIZERS.keys())}")
     
     normalized = normalizer(data)
     
-    # Validação final
     valid_items = []
     for item in normalized:
-        # Obrigatórios: external_id e link
         if not item.get('external_id') or not item.get('link'):
             continue
-        
-        # Valida UF (2 caracteres maiúsculos ou NULL)
         if item.get('state') and len(item['state']) != 2:
             item['state'] = None
-        
         valid_items.append(item)
     
     return valid_items

@@ -6,6 +6,7 @@ Timeout: 2h58min (10680 segundos)
 Delays: 20-40s entre categorias, 1.5-3s entre páginas
 Checkpoint automático a cada 1000 itens
 ✅ FILTRO: Apenas lotes ATIVOS (lot_status_id: 1, 2, 3)
+✅ CORREÇÃO: Valores sempre divididos por 100 (API retorna centavos)
 """
 
 import json
@@ -334,10 +335,11 @@ class SodreScraper:
         else:
             category = "outros"
         
-        # Valor - API retorna em centavos!
+        # ✅ CORREÇÃO CRÍTICA: Valor - API retorna SEMPRE em centavos!
         value_raw = lot.get("bid_actual") or lot.get("bid_initial")
         
         if isinstance(value_raw, str):
+            # Remove formatação brasileira
             value_raw = value_raw.replace("R$", "").replace(".", "").replace(",", ".").strip()
             try:
                 value = float(value_raw)
@@ -348,11 +350,11 @@ class SodreScraper:
         else:
             value = None
         
-        # Divide por 100 se for muito grande (API retorna centavos)
-        if value and value > 1000000:
+        # ✅ SEMPRE divide por 100 (API sempre retorna centavos)
+        if value is not None and value > 0:
             value = value / 100
         
-        # Formata texto
+        # Formata texto em formato brasileiro
         if value:
             value_text = f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         else:
@@ -504,6 +506,7 @@ class SodreScraper:
         print(f"⏰ Início: {datetime.now().strftime('%H:%M:%S')}")
         print(f"⏱️ Timeout: 2h58min")
         print(f"✅ Filtro: Apenas lotes ATIVOS (status 1, 2, 3)")
+        print(f"✅ Correção: Valores sempre divididos por 100 (centavos → reais)")
         print(f"⏳ Delay entre categorias: {CATEGORY_DELAY_MIN}-{CATEGORY_DELAY_MAX}s\n")
         
         # Captura cookies uma vez
